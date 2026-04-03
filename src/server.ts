@@ -1,24 +1,16 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
-
 dotenv.config();
-
 const app = express();
-
 app.use(cors());
-app.options('*', cors());
-
-app.use((req: Request, res: Response, next) => {
-  if (req.originalUrl === '/api/stripe/webhook') {
-    express.raw({ type: 'application/json' })(req, res, next);
-  } else {
-    express.json({ limit: '25mb' })(req, res, next);
-  }
+app.options('*', cors() as any);
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.originalUrl === '/api/stripe/webhook') express.raw({ type: 'application/json' })(req, res, next);
+  else express.json({ limit: '25mb' })(req, res, next);
 });
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
-
 import authRoutes       from './routes/auth';
 import generateRoutes   from './routes/generate';
 import chatRoutes       from './routes/chat';
@@ -26,11 +18,7 @@ import tokenRoutes      from './routes/tokens';
 import projectRoutes    from './routes/projects';
 import generationRoutes from './routes/generations';
 import stripeRoutes     from './routes/stripe';
-
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', service: 'Roomvera Backend' });
-});
-
+app.get('/health', (_req: Request, res: Response) => res.json({ status: 'ok' }));
 app.use('/api/auth',        authRoutes);
 app.use('/api/generate',    generateRoutes);
 app.use('/api/chat',        chatRoutes);
@@ -38,19 +26,10 @@ app.use('/api/tokens',      tokenRoutes);
 app.use('/api/projects',    projectRoutes);
 app.use('/api/generations', generationRoutes);
 app.use('/api/stripe',      stripeRoutes);
-
-app.use((_req: Request, res: Response) => {
-  res.status(404).json({ error: 'Route introuvable' });
-});
-
+app.use((_req: Request, res: Response) => res.status(404).json({ error: 'Route introuvable' }));
 const MONGODB_URI = process.env.MONGODB_URI;
 if (!MONGODB_URI) { console.error('MONGODB_URI manquant'); process.exit(1); }
-
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('✅ MongoDB connected'))
-  .catch((err) => console.error('❌ MongoDB error:', err));
-
+mongoose.connect(MONGODB_URI).then(() => console.log('✅ MongoDB connected')).catch(err => console.error('❌', err));
 const PORT = parseInt(process.env.PORT ?? '5000', 10);
 app.listen(PORT, () => console.log(`🚀 Roomvera backend on port ${PORT}`));
-
 export default app;

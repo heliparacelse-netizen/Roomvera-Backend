@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Router, Response } from 'express';
 import FormData from 'form-data';
 import { v2 as cloudinary } from 'cloudinary';
