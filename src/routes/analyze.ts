@@ -1,3 +1,4 @@
+import fetch from 'node-fetch';
 // @ts-nocheck
 import { Router } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
@@ -45,7 +46,7 @@ router.post('/', authenticate, async (req, res) => {
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+            'Authorization': `Bearer ${process.env.HF_API_KEY}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({ inputs: imageUrl })
@@ -64,7 +65,7 @@ router.post('/', authenticate, async (req, res) => {
     if (!description) {
       try {
         const Groq = require('groq-sdk');
-        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        const groq = new Groq({ apiKey: process.env.HF_API_KEY });
         const completion = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [
