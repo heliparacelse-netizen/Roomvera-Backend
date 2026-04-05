@@ -22,7 +22,9 @@ import stripeRoutes     from './routes/stripe';
 app.get('/health', (_req: Request, res: Response) => res.json({ status: 'ok' }));
 app.use('/api/auth',        authRoutes);
 app.use('/api/generate',    generateRoutes);
-app.use('/api/chat',        chatRoutes);
+app.use('/api/chat', chatRoutes);
+// sessions already handled by chatRoutes
+//app.use('/api/chat',        chatRoutes);
 app.use('/api/tokens',      tokenRoutes);
 app.use('/api/projects',    projectRoutes);
 app.use('/api/generations', generationRoutes);
