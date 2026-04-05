@@ -1,9 +1,9 @@
-import fetch from 'node-fetch';
 // @ts-nocheck
 import { Router } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
 import User from '../models/User';
 import { authenticate } from '../middleware/auth';
+import Groq from 'groq-sdk';
 
 const router = Router();
 
@@ -13,102 +13,91 @@ router.post('/', authenticate, async (req, res) => {
     const { image } = req.body;
     if (!image) return res.status(400).json({ error: 'Image requise' });
 
-    // Vérifier 15 tokens minimum
     const user = await User.findById(userId);
     if (!user || user.tokens < 15) {
-      return res.status(402).json({ error: 'Tokens insuffisants (15 requis)', code: 'NO_TOKENS', tokensRemaining: user?.tokens ?? 0 });
+      return res.status(402).json({
+        error: 'Tokens insuffisants (15 requis)',
+        code: 'NO_TOKENS',
+        tokensRemaining: user?.tokens ?? 0
+      });
     }
 
-    // Déduire 15 tokens AVANT l'analyse
     await User.findByIdAndUpdate(userId, { $inc: { tokens: -15 } });
 
-    // Upload sur Cloudinary pour obtenir une URL publique
-    cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key:    process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET
-    });
+    // Groq Vision — llama-4-scout voit réellement les images (base64)
+    // Même clé GROQ_API_KEY déjà configurée sur Render, rien à ajouter
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-    const uploadResult = await cloudinary.uploader.upload(image, {
-      folder: 'roomvera/analysis',
-      resource_type: 'image'
-    });
+    const base64Data = image.includes(',') ? image.split(',')[1] : image;
+    const mimeType   = image.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
 
-    const imageUrl = uploadResult.secure_url;
-
-    // Appel HuggingFace vision model (router.huggingface.co — pas l'ancien URL déprécié)
-    let description = '';
-    let roomType    = 'living room';
+    let description  = '';
+    let roomType     = 'living room';
+    let stylesSuggested: string[] = [];
+    let lightingAdvice = '';
+    let furnitureSuggestions: string[] = [];
 
     try {
-      const hfRes = await fetch(
-        'https://router.huggingface.co/hf-inference/models/Salesforce/blip-image-captioning-large',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.HF_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ inputs: imageUrl })
-        }
-      );
+      const completion = await groq.chat.completions.create({
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: `data:${mimeType};base64,${base64Data}` }
+              },
+              {
+                type: 'text',
+                text: `You are an expert interior designer. Analyze this room photo and return ONLY valid JSON (no markdown, no explanation):
+{
+  "description": "detailed 2-3 sentence description of the room including layout, furniture, lighting, colors, windows position",
+  "roomType": "living room|bedroom|kitchen|bathroom|office|dining room",
+  "stylesSuggested": ["style1","style2","style3"],
+  "lightingAdvice": "one sentence about lighting",
+  "furnitureSuggestions": ["suggestion1","suggestion2","suggestion3"],
+  "colorPalette": "describe current colors in 1 sentence"
+}`
+              }
+            ]
+          }
+        ],
+        max_tokens: 600,
+        temperature: 0.3
+      });
 
-      if (hfRes.ok) {
-        const hfData = await hfRes.json();
-        description = Array.isArray(hfData) ? hfData[0]?.generated_text ?? '' : hfData?.generated_text ?? '';
-      }
-    } catch (hfErr) {
-      console.error('HuggingFace error:', hfErr);
+      const text = completion.choices[0]?.message?.content ?? '';
+      const clean = text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(clean);
+
+      description         = parsed.description        ?? '';
+      roomType            = parsed.roomType           ?? 'living room';
+      stylesSuggested     = parsed.stylesSuggested    ?? [];
+      lightingAdvice      = parsed.lightingAdvice     ?? '';
+      furnitureSuggestions= parsed.furnitureSuggestions ?? [];
+
+    } catch (visionErr) {
+      console.error('Groq vision error:', visionErr);
+      // Fallback si le modèle vision échoue
+      description  = 'A room with furniture and natural light, ready for AI redesign. Keep the same layout and window positions.';
+      roomType     = 'living room';
+      stylesSuggested = ['modern','scandinavian','japandi'];
     }
-
-    // Fallback si HuggingFace échoue — utiliser Groq pour analyser l'URL
-    if (!description) {
-      try {
-        const Groq = require('groq-sdk');
-        const groq = new Groq({ apiKey: process.env.HF_API_KEY });
-        const completion = await groq.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
-          messages: [
-            { role: 'system', content: 'You are an expert interior designer. Analyze the room description and return a JSON with: description (string), roomType (string), detectedObjects (array), lightingAdvice (string), stylesSuggested (array).' },
-            { role: 'user', content: `Analyze this room image URL and describe what you would typically see in a room photo for interior design purposes. Image: ${imageUrl}. Return JSON only.` }
-          ],
-          max_tokens: 500
-        });
-        const text = completion.choices[0]?.message?.content ?? '';
-        try {
-          const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-          description = parsed.description ?? 'A room ready for AI redesign';
-          roomType    = parsed.roomType ?? 'living room';
-        } catch {
-          description = 'A well-lit room with furniture, ready for AI redesign. Keep the same layout and window positions.';
-        }
-      } catch (groqErr) {
-        description = 'Room detected. Keep the same layout, walls, and window positions during redesign.';
-      }
-    }
-
-    // Détecter le type de pièce depuis la description
-    const descLower = description.toLowerCase();
-    if (descLower.includes('kitchen'))    roomType = 'kitchen';
-    else if (descLower.includes('bed'))   roomType = 'bedroom';
-    else if (descLower.includes('bath'))  roomType = 'bathroom';
-    else if (descLower.includes('office')||descLower.includes('desk')) roomType = 'office';
-    else if (descLower.includes('dining')) roomType = 'dining room';
-    else roomType = 'living room';
 
     const freshUser = await User.findById(userId);
 
     res.json({
       description,
       roomType,
-      imageUrl,
-      detectedObjects: [],
+      stylesSuggested,
+      lightingAdvice,
+      furnitureSuggestions,
       tokensRemaining: freshUser?.tokens ?? 0
     });
 
   } catch (err: any) {
     console.error('Analyze error:', err.message);
-    // Rembourser les 15 tokens en cas d'erreur
     await User.findByIdAndUpdate(userId, { $inc: { tokens: 15 } });
     res.status(500).json({ error: err.message ?? 'Analyse échouée. Tokens remboursés.' });
   }
