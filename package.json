@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Roomvera Backend AI Interior Design",
   "main": "src/index.js",
+  "license": "MIT",
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
