@@ -1,22 +1,5 @@
 const axios = require('axios');
 const cloudinary = require('../../config/cloudinary');
-const create3D = async (imageUrl) => {
-    const { data } = await axios.post('https://api.csm.ai/api/v1/user/generate_image_to_3d', { image_url: imageUrl }, { headers: { 'Authorization': `Bearer ${process.env.CSM_API_KEY}`, 'Content-Type': 'application/json' } });
-    return data.task_id;
-};
-const poll3D = async (taskId) => {
-    let status = 'pending', glbUrl = null;
-    while (status !== 'completed' && status !== 'failed') {
-        await new Promise(r => setTimeout(r, 5000));
-        const { data } = await axios.get(`https://api.csm.ai/api/v1/user/get_generation/${taskId}`, { headers: { 'Authorization': `Bearer ${process.env.CSM_API_KEY}` } });
-        status = data.status;
-        if (status === 'completed') glbUrl = data.result.glb_url;
-        else if (status === 'failed') throw new Error('CSM failed');
-    }
-    const res = await axios.get(glbUrl, { responseType: 'arraybuffer' });
-    const buffer = Buffer.from(res.data, 'binary');
-    return new Promise((resolve, reject) => {
-        cloudinary.uploader.upload_stream({ resource_type: 'raw', public_id: `roomvera_3d/${Date.now()}`, format: 'glb' }, (err, result) => err ? reject(err) : resolve(result.secure_url)).end(buffer);
-    });
-};
+const create3D = async (imageUrl) => { const { data } = await axios.post('https://api.csm.ai/api/v1/user/generate_image_to_3d', { image_url: imageUrl }, { headers: { 'Authorization': `Bearer ${process.env.CSM_API_KEY}`, 'Content-Type': 'application/json' } }); return data.task_id; };
+const poll3D = async (taskId) => { let status = 'pending', glbUrl = null; while (status !== 'completed' && status !== 'failed') { await new Promise(r => setTimeout(r, 5000)); const { data } = await axios.get(`https://api.csm.ai/api/v1/user/get_generation/${taskId}`, { headers: { 'Authorization': `Bearer ${process.env.CSM_API_KEY}` } }); status = data.status; if (status === 'completed') glbUrl = data.result.glb_url; else if (status === 'failed') throw new Error('CSM failed'); } const res = await axios.get(glbUrl, { responseType: 'arraybuffer' }); const buffer = Buffer.from(res.data, 'binary'); return new Promise((resolve, reject) => { cloudinary.uploader.upload_stream({ resource_type: 'raw', public_id: `roomvera_3d/${Date.now()}`, format: 'glb' }, (err, result) => err ? reject(err) : resolve(result.secure_url)).end(buffer); }); };
 module.exports = { create3D, poll3D };
