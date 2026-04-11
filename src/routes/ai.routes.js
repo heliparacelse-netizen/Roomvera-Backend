@@ -1,0 +1,14 @@
+const router = require('express').Router();
+const { protect } = require('../middleware/auth');
+const upload = require('../middleware/upload');
+const c = require('../controllers/ai.controller');
+router.post('/chat', protect, upload.single('image'), c.chatAssistant);
+router.post('/add-furniture', protect, upload.single('image'), c.addFurniture);
+router.post('/remove-object', protect, upload.single('image'), c.removeObject);
+router.post('/declutter', protect, upload.single('image'), c.declutter);
+router.post('/style-swap', protect, upload.single('image'), c.styleSwap);
+router.post('/seasonal', protect, upload.single('image'), c.seasonal);
+router.post('/enhance', protect, upload.single('image'), c.enhance);
+router.post('/generate-video', protect, upload.single('image'), c.generateVideo);
+router.post('/generate-3d', protect, upload.single('image'), c.generate3D);
+module.exports = router;

@@ -1,0 +1,77 @@
+const cloudinary = require('../config/cloudinary');
+const Project = require('../models/Project');
+const { generateImage } = require('../services/ai/replicate.service');
+const { createVideo, pollVideo } = require('../services/ai/luma.service');
+const { create3D, poll3D } = require('../services/ai/csm.service');
+const { chatCompletion } = require('../services/ai/groq.service');
+const { imageAnalysis } = require('../services/ai/huggingface.service');
+
+const uploadToCloudinary = (buffer, folder = 'roomvera_interiors') => new Promise((resolve, reject) => {
+    cloudinary.uploader.upload_stream({ folder }, (err, res) => err ? reject(err) : resolve(res)).end(buffer);
+});
+
+const processAI = async (req, res, action, cost) => {
+    try {
+        if (req.user.credits < cost) return res.status(403).json({ error: 'Insufficient credits' });
+        const cRes = await uploadToCloudinary(req.file.buffer);
+        const outputUrl = await generateImage(cRes.secure_url, req.body.prompt || action);
+        req.user.credits -= cost; await req.user.save();
+        await Project.create({ user: req.user._id, type: action, prompt: req.body.prompt, inputUrl: cRes.secure_url, outputUrl, creditsCost: cost });
+        res.status(200).json({ outputUrl, creditsRemaining: req.user.credits });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+exports.addFurniture = (req, res) => processAI(req, res, 'add-furniture', 2);
+exports.removeObject = (req, res) => processAI(req, res, 'remove-object', 1);
+exports.styleSwap = (req, res) => processAI(req, res, 'style-swap', 1);
+exports.seasonal = (req, res) => processAI(req, res, 'seasonal', 1);
+exports.enhance = (req, res) => processAI(req, res, 'enhance', 3);
+
+exports.declutter = async (req, res) => {
+    try {
+        const objs = JSON.parse(req.body.objects || '[]');
+        const cost = objs.length; if (!cost) return res.status(400).json({ error: 'No objects' });
+        if (req.user.credits < cost) return res.status(403).json({ error: 'Insufficient credits' });
+        const cRes = await uploadToCloudinary(req.file.buffer);
+        const outputUrl = await generateImage(cRes.secure_url, `Remove ${objs.map(o=>o.name).join(', ')}`);
+        req.user.credits -= cost; await req.user.save();
+        await Project.create({ user: req.user._id, type: 'declutter', inputUrl: cRes.secure_url, outputUrl, creditsCost: cost });
+        res.status(200).json({ outputUrl, creditsRemaining: req.user.credits });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+exports.generateVideo = async (req, res) => {
+    try {
+        if (req.user.credits < 5) return res.status(403).json({ error: 'Insufficient credits' });
+        const cRes = await uploadToCloudinary(req.file.buffer);
+        const vId = await createVideo(cRes.secure_url);
+        const finalUrl = await pollVideo(vId);
+        req.user.credits -= 5; await req.user.save();
+        await Project.create({ user: req.user._id, type: 'generate-video', inputUrl: cRes.secure_url, outputUrl: finalUrl, creditsCost: 5 });
+        res.status(200).json({ outputUrl: finalUrl, creditsRemaining: req.user.credits });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+exports.generate3D = async (req, res) => {
+    try {
+        if (req.user.credits < 3) return res.status(403).json({ error: 'Insufficient credits' });
+        const cRes = await uploadToCloudinary(req.file.buffer);
+        const tId = await create3D(cRes.secure_url);
+        const finalUrl = await poll3D(tId);
+        req.user.credits -= 3; await req.user.save();
+        await Project.create({ user: req.user._id, type: 'generate-3d', inputUrl: cRes.secure_url, outputUrl: finalUrl, creditsCost: 3 });
+        res.status(200).json({ outputUrl: finalUrl, creditsRemaining: req.user.credits });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+exports.chatAssistant = async (req, res) => {
+    try {
+        if (req.file) {
+            const cRes = await uploadToCloudinary(req.file.buffer, 'roomvera_chat');
+            const analysis = await imageAnalysis(cRes.secure_url);
+            return res.status(200).json({ reply: `Image detected: "${analysis}". ${req.body.prompt || 'How can I help redesign this?'}` });
+        }
+        const reply = await chatCompletion(req.body.history || [{ role: 'user', content: req.body.prompt }]);
+        res.status(200).json({ reply });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+};
